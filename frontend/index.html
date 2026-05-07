@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Timeline Walkway</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<style>
+html, body { margin:0; background:#0e1116; overflow:hidden; touch-action:none; }
+canvas { display:block; }
+video#overlayVideo { position:fixed; inset:0; width:100%; height:100%; background:black; z-index:10; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="overlayVideo" controls hidden></video>
+<script>
+const API = '/api/moments';
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let cameraZ=0,targetZ=0,selected=null;
+const STEP=300,Z_MIN=0,Z_MAX=2400;
+const laneNear=0.26,laneFar=0.035,horizon=0.22;
+const Z_NEAR=60,Z_FAR=2600,TEXT_VISIBLE_Z=480;
+let moments=[];
+
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
+resize();window.addEventListener('resize',resize);
+
+function move(d){targetZ=Math.max(Z_MIN,Math.min(Z_MAX,targetZ+d));}
+
+fetch(API).then(r=>r.json()).then(data=>{
+  moments=data;
+  moments.forEach(m=>{
+    m.screen={x:0,y:0,w:0,h:0};
+    if(m.media) m.media.forEach(md=>{ if(md.type==='image'){ md.img=new Image(); md.img.src=md.url; }});
+  });
+});
+
+function drawPath(){
+  const w=canvas.width,h=canvas.height;
+  const nearW=w*laneNear,farW=w*laneFar,hy=h*horizon;
+  ctx.beginPath();
+  ctx.moveTo((w-nearW)/2,h);
+  ctx.lineTo((w+nearW)/2,h);
+  ctx.lineTo((w+farW)/2,hy);
+  ctx.lineTo((w-farW)/2,hy);
+  ctx.closePath();
+  const g=ctx.createLinearGradient(0,h,0,hy);
+  g.addColorStop(0,'#2b3446');g.addColorStop(1,'#0e1116');
+  ctx.fillStyle=g;ctx.fill();
+}
+
+function drawMoment(m){
+  const dz=m.z-cameraZ; if(dz<Z_NEAR||dz>Z_FAR) return;
+  const w=canvas.width,h=canvas.height,t=dz/Z_FAR;
+  const scale=Math.pow(1-t,2.4);
+  const laneW=w*(laneNear*Math.pow(1-t,1.6)+laneFar*t);
+  const x=w/2+m.side*laneW*0.45;
+  const y=h-Math.pow(dz,1.12)*0.32;
+  const cw=220*scale,ch=340*scale;
+  m.screen={x:x-cw/2,y:y-ch,w:cw,h:ch};
+  ctx.save();ctx.globalAlpha=Math.max(0.15,1-t);
+  if(m.pop&&dz<900){ctx.shadowColor='#8cd0ff';ctx.shadowBlur=30*scale;}
+  ctx.translate(m.screen.x,m.screen.y);
+  ctx.fillStyle='#111827';ctx.strokeStyle=m.pop?'#8cd0ff':'#2a2f3a';ctx.lineWidth=2;
+  ctx.beginPath();ctx.roundRect(0,0,cw,ch,16*scale);ctx.fill();ctx.stroke();ctx.shadowBlur=0;
+  if(dz<TEXT_VISIBLE_Z){ctx.fillStyle='#e5e7eb';ctx.font=`${12*scale}px system-ui`;ctx.fillText(m.title,12*scale,ch-20*scale);}  
+  ctx.restore();
+}
+
+function drawExpanded(m){
+  const cx=canvas.width/2,cy=canvas.height/2,w=340,h=520;
+  ctx.fillStyle='#0f172a';ctx.strokeStyle='#8cd0ff';ctx.lineWidth=2;
+  ctx.beginPath();ctx.roundRect(cx-w/2,cy-h/2,w,h,20);ctx.fill();ctx.stroke();
+  ctx.fillStyle='#e5e7eb';ctx.font='18px system-ui';ctx.fillText(m.title,cx-w/2+16,cy-h/2+32);
+  if(m.media&&m.media[0]){
+    const md=m.media[0];
+    if(md.type==='image'&&md.img?.complete){ctx.drawImage(md.img,cx-w/2+20,cy-h/2+56,w-40,360);}  
+  }
+}
+
+function drawOverlay(){
+  const w=canvas.width,h=canvas.height;
+  const g=ctx.createRadialGradient(w/2,h*0.6,h*0.2,w/2,h*0.6,h);
+  g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,0.55)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#9ca3af';ctx.font='36px system-ui';ctx.textAlign='center';
+  ctx.fillText('▲',w/2,42);ctx.fillText('▼',w/2,h-16);
+}
+
+function render(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawPath();
+  moments.filter(m=>m.z-cameraZ>Z_NEAR&&m.z-cameraZ<Z_FAR).sort((a,b)=>b.z-a.z).forEach(drawMoment);
+  if(selected) drawExpanded(selected);
+  drawOverlay();
+}
+
+function loop(){
+  cameraZ+=(targetZ-cameraZ)*0.12;
+  if(Math.abs(targetZ-cameraZ)<0.5) cameraZ=targetZ;
+  render();requestAnimationFrame(loop);
+}
+loop();
+
+let startY=null;
+canvas.addEventListener('pointerdown',e=>startY=e.clientY);
+canvas.addEventListener('pointerup',e=>{
+  if(startY===null) return; const dy=e.clientY-startY; startY=null;
+  if(Math.abs(dy)>50) move(dy<0?STEP:-STEP);
+});
+canvas.addEventListener('click',e=>{
+  if(e.clientY<80) return move(STEP);
+  if(e.clientY>canvas.height-80) return move(-STEP);
+  for(const m of moments){const r=m.screen;if(e.clientX>=r.x&&e.clientX<=r.x+r.w&&e.clientY>=r.y&&e.clientY<=r.y+r.h){selected=selected===m?null:m;return;}}
+});
+</script>
+</body>
+</html>
