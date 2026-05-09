@@ -14,7 +14,9 @@ video#overlayVideo { position:fixed; inset:0; width:100%; height:100%; backgroun
 <canvas id="c"></canvas>
 <video id="overlayVideo" controls hidden></video>
 <script>
-const API = '/api/moments';
+const USE_API = false; // set to true to use the backend API instead of local JSON
+const API = 'https://probable-meme-6xv75p6j7qhx64p-3000.app.github.dev/api/moments';
+const LOCAL_JSON = './moments.json';
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 let cameraZ=0,targetZ=0,selected=null;
@@ -28,7 +30,7 @@ resize();window.addEventListener('resize',resize);
 
 function move(d){targetZ=Math.max(Z_MIN,Math.min(Z_MAX,targetZ+d));}
 
-fetch(API).then(r=>r.json()).then(data=>{
+fetch(USE_API ? API : LOCAL_JSON).then(r=>r.json()).then(data=>{
   moments=data;
   moments.forEach(m=>{
     m.screen={x:0,y:0,w:0,h:0};
